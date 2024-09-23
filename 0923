@@ -1,0 +1,164 @@
+#define A0pin A0           // 아날로그 핀 A0를 A0pin으로 재정의
+#define SIpin 23           // TSL1401 라인 센서의 SI (시작 신호) 핀을 23번으로 정의
+#define CLKpin 22          // TSL1401 라인 센서의 CLK (클럭 신호) 핀을 22번으로 정의
+#define NPIXELS 128        // 라인 센서에서 읽어들일 픽셀 개수를 128로 설정
+
+// 센서에서 읽은 값을 저장할 배열, 각 픽셀의 값은 0~255 사이
+byte Pixel[NPIXELS];       
+
+// 임계값을 기준으로 이진화한 값을 저장할 배열, 0 또는 255
+byte Threshold_Data[NPIXELS]; 
+
+// 라인 센서에서 읽어들인 값을 저장할 배열
+int LineSensor_Data[NPIXELS];
+
+// 적응형 처리를 위한 데이터를 저장할 배열
+int LineSensor_Data_Adaption[NPIXELS];
+
+// 각 픽셀의 최대값을 저장할 배열
+int MAX_LineSensor_Data[NPIXELS];
+
+// 각 픽셀의 최소값을 저장할 배열
+int MIN_LineSensor_Data[NPIXELS];
+
+// 적응형 처리를 위해 사용하는 플래그
+int flag_line_adapation;  
+
+// 빠른 ADC 모드 활성화 여부를 정의, 1이면 활성화
+#define FASTADC 1          
+
+// 특정 레지스터 비트(bit)를 클리어하는 매크로
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
+
+// 특정 레지스터 비트(bit)를 설정하는 매크로
+#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
+
+// 초기 설정을 위한 함수
+void setup()
+{
+  // 배열 초기화: 각 배열을 기본값으로 설정
+  for (int i = 0; i < NPIXELS; i++)
+  {
+    LineSensor_Data[i] = 0;           // 센서 데이터를 0으로 초기화
+    LineSensor_Data_Adaption[i] = 0;  // 적응형 데이터도 0으로 초기화
+    MAX_LineSensor_Data[i] = 1023;    // 최대값을 1023으로 설정
+    MIN_LineSensor_Data[i] = 0;       // 최소값을 0으로 설정
+  }
+
+  // SI 핀, CLK 핀을 출력 모드로 설정
+  pinMode(SIpin, OUTPUT);   
+  pinMode(CLKpin, OUTPUT);
+
+  // A0 핀을 입력 모드로 설정
+  pinMode(A0pin, INPUT);    
+
+  // SI 핀과 CLK 핀을 낮은 상태로 설정하여 대기 상태로 유지
+  digitalWrite(SIpin, LOW);  
+  digitalWrite(CLKpin, LOW); 
+
+  // 빠른 ADC 설정
+  #if FASTADC
+    sbi(ADCSRA, ADPS2);  // 프리스케일러를 16으로 설정
+    cbi(ADCSRA, ADPS1);
+    cbi(ADCSRA, ADPS0);
+  #endif
+
+  // 적응형 플래그를 0으로 초기화
+  flag_line_adapation = 0;  
+
+  // 시리얼 통신 시작, 통신 속도를 115200 baud로 설정
+  Serial.begin(115200);
+  Serial.println("TSL1401"); // "TSL1401" 센서명을 시리얼 출력
+}
+
+// 센서 데이터를 임계값을 기준으로 이진화하는 함수
+void threshold_line_image(int threshold_value)
+{
+  // 각 픽셀의 값을 확인하여 임계값을 기준으로 이진화
+  for (int i = 0; i < NPIXELS; i++)
+  {
+    if (Pixel[i] >= threshold_value)
+    {
+      Threshold_Data[i] = 255; // 임계값 이상인 경우 흰색 (255)
+    }
+    else
+    {
+      Threshold_Data[i] = 0;   // 임계값 미만인 경우 검정색 (0)
+    }
+  }
+}
+
+// TSL1401 라인 센서에서 데이터를 읽는 함수
+void read_line_camera(void)
+{
+  // 1ms 지연하여 카메라 안정화
+  delay(1); 
+
+  // SI 핀을 HIGH로 설정하고, CLK 핀을 전환하여 데이터 읽기 시작
+  digitalWrite(CLKpin, LOW);  
+  digitalWrite(SIpin, HIGH);  
+  digitalWrite(CLKpin, HIGH); 
+  digitalWrite(SIpin, LOW);   
+  delayMicroseconds(1);       
+
+  // 각 픽셀의 값을 A0 핀에서 읽어들여 Pixel 배열에 저장
+  for (int i = 0; i < NPIXELS; i++)
+  {
+    Pixel[i] = analogRead(A0pin) / 4; // A0 핀의 아날로그 값을 8비트(0~255)로 변환
+    digitalWrite(CLKpin, LOW);        // CLK 핀을 LOW로 설정하여 다음 데이터 준비
+    delayMicroseconds(1);             // 1마이크로초 지연
+    digitalWrite(CLKpin, HIGH);       // CLK 핀을 HIGH로 설정하여 데이터 전송
+  }
+
+  // 마지막으로 CLK 핀을 LOW로 설정
+  digitalWrite(CLKpin, LOW); 
+}
+
+// 이진화된 데이터의 질량중심을 계산하는 함수
+double line_COM(void)
+{
+  double COM = 0.0;       // 질량중심 값을 저장할 변수
+  double mass_sum = 0;    // 이진화된 데이터의 총합을 저장할 변수
+
+  // 각 픽셀의 이진화된 데이터를 바탕으로 질량중심을 계산
+  for (int i = 0; i < NPIXELS; i++)
+  {
+    mass_sum += Threshold_Data[i];    // 이진화된 데이터의 총합
+    COM += Threshold_Data[i] * i;     // 픽셀 위치에 따른 가중치 합산
+  }
+
+  // 데이터가 없으면 -1 반환
+  if (mass_sum == 0)
+  {
+    return -1;  
+  }
+
+  // 질량중심 계산 (가중치 합계를 총합으로 나눔)
+  COM = COM / mass_sum; 
+  return COM;  // 질량중심 값 반환
+}
+
+// 메인 루프 함수
+void loop()
+{
+  double cx = 0;  // 질량중심 값을 저장할 변수
+
+  // 센서에서 데이터를 읽고, 이진화하여 질량중심을 계산
+  read_line_camera();            // 라인 센서에서 데이터 읽기
+  threshold_line_image(50);      // 임계값 50을 기준으로 이진화
+  cx = line_COM();               // 질량중심 값 계산
+
+  // 각 픽셀의 원본 데이터, 이진화된 데이터, 질량중심 값을 시리얼로 출력
+  for (int i = 0; i < NPIXELS; i++)
+  {
+    Serial.print(Pixel[i]);           // 원본 센서 데이터 출력
+    Serial.print(",");                // 데이터 구분자 출력
+    Serial.print(Threshold_Data[i]);   // 이진화된 데이터 출력
+    Serial.print(",");                // 데이터 구분자 출력
+    Serial.print(cx);                 // 질량중심 값 출력
+    Serial.println();                 // 줄바꿈
+  }
+
+  // 출력 속도를 조절하기 위해 약간의 지연을 추가 (100ms)
+  delay(100);  
+}
