@@ -1,0 +1,31 @@
+const byte encoder_A = 21;  // A채널 핀을 2번 핀으로 설정
+const byte encoder_B = 20; // B채널 핀
+volatile long encoder_pulse_cnt = 0; // 전역 변수로 펄스 카운트를 저장
+
+void setup()
+{
+  pinMode(encoder_A, INPUT_PULLUP); // A채널 입력
+  pinMode(encoder_B, INPUT_PULLUP); // B채널 입력
+  encoder_pulse_cnt = 0;            
+  attachInterrupt(digitalPinToInterrupt(encoder_A), EncoderA, RISING); 
+  Serial.begin(115200);            
+}
+
+void loop()
+{
+  Serial.print("펄스 수: ");
+  Serial.println(encoder_pulse_cnt); 
+  delay(100);                        
+}
+
+void EncoderA()
+{
+  if (digitalRead(encoder_B) == HIGH)
+  {
+    encoder_pulse_cnt++;
+  }
+  else
+  {
+    encoder_pulse_cnt--; 
+  }
+}
