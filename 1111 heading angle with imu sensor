@@ -1,7 +1,6 @@
+/////////////////IMU/////////////////
 #include <Wire.h>
 #include <LSM303.h>
-
-#define THRESHOLD_ANGLE 10
 
 #define ENA 7
 #define IN1 11
@@ -9,141 +8,140 @@
 #define IN3 9
 #define IN4 8
 #define ENB 6
-
-#define del 325
+#define THRESHOLD_ANGLE 10
+#define motor_offset 30
 
 LSM303 compass;
 
 float heading_angle = 0.0;
-float in_heading_angle = 17.0;
+float init_heading_angle = 17.0;
 float target_heading_angle = 90;
 float heading_angle_error = 0.0;
 
-void setup() {
-  Serial.begin(9600);
-  
+float kp_yaw = 0.21;
+float kd_yaw = 0.4;
+float error_yaw = 0.0;
+float error_yaw_old = 0.0;
+float target_angle;
+float pid_out;
+float target_yaw;
+int mission_flag;
+int base_speed = 110;
+
+void setup()
+{
+  //put your setup code here, to run once:
+
+  pinMode(ENL, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(ENR, OUTPUT);
+
+  Serial.begin(115200);
+
   Wire.begin();
   compass.init();
   compass.enableDefault();
-  
-  compass.m_min = (LSM303::vector<int16_t>){-32767, -32767, -32767};
-  compass.m_max = (LSM303::vector<int16_t>){+32767, +32767, +32767};
+
+  compass.m_min = (LSM303::vector<int16_t>) {
+    -32767, -32767, -32767
+  };
+  compass.m_max = (LSM303::vector<int16_t>) {
+    +32767, +32767, +32767
+  };
+
+  mission_flag = 0;
 }
 
-void motor_A_control(int direction_a, int motor_speed_a) //모터 A의 방향(direction)과 속도(speed) 제어
+void motor_l(int speed)
 {
-  if(direction_a == HIGH)
-  {
-
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-     analogWrite(ENA,motor_speed_a); //모터의 속도 제어
-    
-  }
-  else
-  {
-    digitalWrite(IN1, LOW); //모터의 방향 제어
-    digitalWrite(IN2, HIGH);
-    analogWrite(ENA,motor_speed_a);
-    
-  }
+    if (speed >= 0)
+    {
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+        analogWrite(ENL, speed); // 0-255
+    }
+    else
+    {
+        digitalWrite(IN1, HIGH);
+        digitalWrite(IN2, LOW);
+        analogWrite(ENL, -speed);
+    }
 }
 
-void motor_B_control(int direction_b, int motor_speed_b) //모터 A의 방향(direction)과 속도(speed) 제어
+void motor_r(int speed)
 {
-  if(direction_b == HIGH)
-  {
-
-     digitalWrite(IN3, LOW);
-     digitalWrite(IN4, HIGH);
-     analogWrite(ENB,motor_speed_b); //모터의 속도 제어
-    
-  }
-  else
-  {
-    digitalWrite(IN3, HIGH); //모터의 방향 제어
-    digitalWrite(IN4, LOW);
-    analogWrite(ENB,motor_speed_b);
-    
-  }
+    if (speed >= 0)
+    {
+        digitalWrite(IN3, LOW);
+        digitalWrite(IN4, HIGH);
+        analogWrite(ENR, speed); // 0-255
+    }
+    else
+    {
+        digitalWrite(IN3, HIGH);
+        digitalWrite(IN4, LOW);
+        analogWrite(ENR, -speed);
+    }
 }
 
-
-void imu_rotation(void)
+void motor_control(int left_motor_speed, int right_motor_speed)
 {
+    motor_l(left_motor_speed);
+    motor_r(right_motor_speed);
+}
+
+void yaw_control(void)
+{
+  float error_yaw_d = 0.0;
+  int l_motor_speed = 0;
+  int r_motor_speed = 0;
   compass.read();
-  float heading1 = compass.heading();
+  float heading_angle1 = compass.heading();
   compass.read();
-  float heading2 = compass.heading();
-  float heading = (heading1 + heading2)/2;
+  float heading_angle2 = compass.heading();
 
-  heading = 360 - heading;
+  float heading_angle = (heading_angle1 + heading_angle2) / 2;
 
-  Serial.println(heading);
+  error_yaw = target_angle - heading_angle;
+  error_yaw_d = error_yaw - error_yaw_old;
+  pid_out = kp_yaw * error_yaw + kd_yaw * error_yaw_d;
+  error_yaw_old = error_yaw;
+  l_motor_speed = base_speed + (int)pid_out;
+  r_motor_speed = - base_speed + motor_offset - (int)pid_out;
+  motor_control(l_motor_speed, r_motor_speed);
 
-  heading_angle_error = target_heading_angle - heading;
-
-  if(heading_angle_error > 180)
-  {
-    heading_angle_error = heading_angle_error - 360;
-  }
-  else if(heading_angle_error < -180)
-  {
-    heading_angle_error = heading_angle_error + 360;
-  }
-
-  Serial.print("Heading Angle Error : ");
-  Serial.print(heading_angle_error);
-  Serial.print(" = ");
-  Serial.print(target_heading_angle);
-  Serial.print(" - ");
-  Serial.println(heading);
-
-  if(heading_angle_error > THRESHOLD_ANGLE)
-  {
-    motor_A_control(HIGH,50);
-    motor_B_control(LOW,50);
-  }
-  else if((heading_angle_error >= -THRESHOLD_ANGLE)&&(heading_angle_error <= THRESHOLD_ANGLE))
-  {
-    motor_A_control(HIGH,0);
-    motor_B_control(HIGH,0);
-  }
-  else
-  {
-    motor_A_control(LOW,50);
-    motor_B_control(HIGH,50);
-  }
 }
 
-void loop() {
-    motor_A_control(HIGH,150);
-    motor_B_control(HIGH,150);
-    delay(del);
-    motor_A_control(HIGH,108);
-    motor_B_control(HIGH,108);
-    delay(del);
-    motor_A_control(HIGH,80);
-    motor_B_control(HIGH,80);
-    delay(del);
-    motor_A_control(HIGH,70);
-    motor_B_control(HIGH,70);
-    delay(del);
-    motor_A_control(HIGH,60);
-    motor_B_control(HIGH,60);
-    delay(del);
-    motor_A_control(HIGH,50);
-    motor_B_control(HIGH,50);
-    delay(del);
-    motor_A_control(HIGH,40);
-    motor_B_control(HIGH,40);
-    delay(del);
-    motor_A_control(HIGH,30);
-    motor_B_control(HIGH,30);
-    delay(3*del);
-    motor_A_control(HIGH,0);
-    motor_B_control(HIGH,0);
-    delay(10000);
 
-    
+void loop()
+{
+  switch (mission_flag)
+  {
+    case 0 : 
+      /*while(1)
+        motor_control(50,50);*/
+      compass.read();
+      heading_angle = compass.heading();
+      target_angle = 90 + compass.heading();
+      error_yaw = target_angle - heading_angle;
+      mission_flag = 1;
+      break;
+    case 1 :
+      if ((error_yaw < 5) && (error_yaw > -5))
+      {
+        motor_control(0,0);
+        mission_flag = 2;
+      }
+      else
+      {
+        yaw_control();
+      }
+      break;
+    case 2 :
+      break;
+  }
 }
