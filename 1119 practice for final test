@@ -7,12 +7,12 @@
 #define CLKpin 22
 #define NPIXELS 128
 
-#define ENA 7
-#define IN1 11
-#define IN2 10
-#define IN3 9
-#define IN4 8
-#define ENB 6
+#define ENA 12
+#define IN1 8
+#define IN2 9
+#define IN3 10
+#define IN4 11
+#define ENB 13
 
 #define base_speed 100
 #define Grid_Size 0.4
@@ -64,12 +64,13 @@ struct Waypoint
   double heading_angle;
 };
 
-Waypoint waypoints[20];
+Waypoint waypoints[8];
 int waypoint_no = 0;
 
 void setup() 
 {
-  reset_encoder();
+  reset_encoder();               
+  reset_IMU();                   
   MsTimer2::set(20, MsTimer2_ISR);
   MsTimer2::start();
 
@@ -102,14 +103,15 @@ void setup()
 
   waypoints[0] = {0, 0};            
   waypoints[1] = {2 * Grid_Size, 0};
-  waypoints[2] = {0, 90};           
-  waypoints[3] = {3 * Grid_Size, 90};
-  waypoints[4] = {0, 0};             
-  waypoints[5] = {0, -90};         
-  waypoints[6] = {1 * Grid_Size, -90}; 
-  waypoints[7] = {0, -90};
-
+  waypoints[2] = {0, 90};  
+  waypoints[3] = {1 * Grid_Size, 0};  
+  waypoints[4] = {2 * Grid_Size, 0};
+  waypoints[5] = {0, 0};             
+  waypoints[6] = {0, -90};         
+  waypoints[7] = {1 * Grid_Size, 0}; 
+  waypoints[8] = {0, -90};
 }
+
 
 void reset_encoder() 
 {
@@ -172,6 +174,13 @@ void motor_control(int left_motor_speed, int right_motor_speed)
 {
   motor_l(left_motor_speed);
   motor_r(right_motor_speed);
+}
+
+void reset_IMU() {
+  compass.init(); 
+  delay(100);     
+  compass.read(); 
+  Serial.println("IMU has been reset.");
 }
 
 void read_line_camera(void)
@@ -300,84 +309,60 @@ void loop()
     case 0: 
       motor_control(0, 0);
       delay(500);
-      robot_distance = 0.0;  
-      function_flag = 1;  
-      mission_flag = 1;   
+      reset_encoder();
+      robot_distance = 0.0;
+      reset_IMU(); 
+      function_flag = 1; 
+      mission_flag = 1;
       break;
 
-    case 1: 
-      if (robot_distance >= waypoints[waypoint_no].distance) 
-      {  
+    case 1:
+      if (robot_distance >= waypoints[waypoint_no].distance)
+      {
         function_flag = 3; 
-        delay(500);       
-        target_yaw = waypoints[waypoint_no].heading_angle - compass.heading(); 
+        delay(500);
+        reset_IMU(); 
+        target_yaw = waypoints[waypoint_no].heading_angle; 
         function_flag = 2; 
-        mission_flag = 2;  
-        waypoint_no++;     
+        mission_flag = 2;
+      }
+      else
+      {
+        line_tracer(); 
       }
       break;
 
     case 2: 
       yaw_control(); 
-      if (error_yaw < 3 && error_yaw > -3) 
-      {  
+      if (abs(error_yaw) < 3) 
+      {
         function_flag = 3; 
         delay(500);
         reset_encoder();
-        mission_flag = 3;  
+        mission_flag = 3;
       }
       break;
 
-    case 3:
-      if (robot_distance >= waypoints[waypoint_no].distance) 
-      {  
-        function_flag = 3; 
-        delay(500);      
-        target_yaw = waypoints[waypoint_no].heading_angle - compass.heading(); 
-        function_flag = 2; 
-        mission_flag = 4;  
-        waypoint_no++;     
+    case 3: 
+      motor_control(0, 0);
+      delay(500);
+      reset_encoder();
+      robot_distance = 0.0;
+      reset_IMU(); 
+
+      waypoint_no++;
+      if (waypoint_no < sizeof(waypoints) / sizeof(waypoints[0]))
+      {
+        mission_flag = 0; 
+      }
+      else
+      {
+        mission_flag = 4; 
       }
       break;
 
     case 4: 
-      yaw_control(); 
-      if (error_yaw < 3 && error_yaw > -3) 
-      {  
-        function_flag = 3; 
-        delay(500);
-        reset_encoder();
-        mission_flag = 5;
-      }
-      break;
-
-    case 5:
-      if (robot_distance >= waypoints[waypoint_no].distance) 
-      {  
-        function_flag = 3;
-        delay(500);        
-        target_yaw = waypoints[waypoint_no].heading_angle - compass.heading();
-        function_flag = 2;
-        mission_flag = 6; 
-        waypoint_no++;    
-      }
-      break;
-
-    case 6: 
-      yaw_control();
-      if (error_yaw < 3 && error_yaw > -3) 
-      {  
-        function_flag = 3; 
-        delay(500);
-        mission_flag = 7;
-      }
-      break;
-
-    case 7:
-      motor_control(0, 0);  
+      motor_control(0, 0); 
       break;
   }
 }
-
-
-
