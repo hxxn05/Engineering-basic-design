@@ -1,29 +1,27 @@
-nclude <MsTimer2.h>
+#include <MsTimer2.h>
 #include <LSM303.h>
 
-#define test_pin 50
+#define Test_pin 42
 #define A0pin A0
 #define SIpin 23
-#define CLKpin 22
+#define CLkpin 22
 #define NPIXELS 128
 
-#define ENA 12
-#define IN1 7
-#define IN2 8
-#define IN3 9
-#define IN4 10
-#define ENB 13
+#define ENA 8
+#define IN1 9
+#define IN2 10
+#define IN3 11
+#define IN4 12
+#define ENB 7
 
-#define Base_speed 80
-#define Grid_Size 0.4
-#define Base_speed 100
+#define base_speed 80
 #define Grid_Size 0.4
 
 float target_heading_angle = 90;
-float Yaw_kp = 0.18;
-float Yaw_kd = 0.4;
+float Yaw_kp = 0.21;
+float Yaw_kd = 0.5;
 float Yaw_error = 0.0;
-float Yaw_old_error = 0.0;
+float Yaw_error_old = 0.0;
 float pid_out;
 float target_yaw;
 
@@ -34,19 +32,19 @@ byte Threshold_Data[NPIXELS];
 
 int LineSensor_Data[NPIXELS];
 int LineSensor_Data_Adaption[NPIXELS];
-int LineSensor_MAX_Data[NPIXELS];
-int LineSensor_MIN_Data[NPIXELS];
+int MAX_LineSensor_Data[NPIXELS];
+int MIN_LineSensor_Data[NPIXELS];
 int flag_line_adapation;
 
 long Encoder_A_pulse = 0;
 long Encoder_B_pulse = 0;
-long Prev_encoder_A = 0;
-long Prev_encoder_B = 0;
+long Prev_Encoder_A = 0;
+long Prev_Encoder_B = 0;
 
 const int IMG_WIDTH_HALF = 64;
-const int Base_speed = 70;
-const float KP = 3.0;
-const float KD = 0.3;
+const int BASE_SPEED = 100;
+const float kp = 4.7;
+const float kd = 0.3;
 float error_old = 0.0;
 
 #define FASTADC 1
@@ -60,13 +58,12 @@ int pulses_per_rev = 360;
 int mission_flag = 0;
 int function_flag = 0;
 
-struct Waypoint
-{
+struct Waypoint {
   double distance;
   double heading_angle;
 };
 
-Waypoint waypoints[9];
+Waypoint waypoints[12];
 int waypoint_no = 0;
 
 void setup()
@@ -80,16 +77,16 @@ void setup()
   {
     LineSensor_Data[i] = 0;
     LineSensor_Data_Adaption[i] = 0;
-    LineSensor_MAX_Data[i] = 1023;
-    LineSensor_MIN_Data[i] = 0;
+    MAX_LineSensor_Data[i] = 1023;
+    MIN_LineSensor_Data[i] = 0;
   }
 
   pinMode(SIpin, OUTPUT);
-  pinMode(CLKpin, OUTPUT);
+  pinMode(CLkpin, OUTPUT);
   pinMode(A0pin, INPUT);
 
   digitalWrite(SIpin, LOW);
-  digitalWrite(CLKpin, LOW);
+  digitalWrite(CLkpin, LOW);
 
 #if FASTADC
   sbi(ADCSRA, ADPS2);
@@ -99,19 +96,22 @@ void setup()
 
   flag_line_adapation = 0;
 
-  pinMode(test_pin, OUTPUT);
+  pinMode(Test_pin, OUTPUT);
 
   Serial.begin(115200);
 
   waypoints[0] = {0, 0};
   waypoints[1] = {2 * Grid_Size, 0};
   waypoints[2] = {0, 90};
-  waypoints[3] = {1 * Grid_Size, 0};
-  waypoints[4] = {2 * Grid_Size, 0};
-  waypoints[5] = {0, 0};
-  waypoints[6] = {0, -90};
-  waypoints[7] = {1 * Grid_Size, 0};
-  waypoints[8] = {0, -90};
+  waypoints[3] = {3 * Grid_Size, 0};
+  waypoints[4] = {0, -90};
+  waypoints[5] = {1 * Grid_Size, 0};
+  waypoints[6] = {0, 0};
+  waypoints[7] = {0, -90};
+  waypoints[8] = {3 * Grid_Size, 0};
+  waypoints[9] = {0, 90};
+  waypoints[10] = {1 * Grid_Size, 0};
+
 }
 
 
@@ -119,8 +119,8 @@ void reset_encoder()
 {
   Encoder_A_pulse = 0;
   Encoder_B_pulse = 0;
-  Prev_encoder_A = 0;
-  Prev_encoder_B = 0;
+  Prev_Encoder_A = 0;
+  Prev_Encoder_B = 0;
 }
 
 void MsTimer2_ISR()
@@ -188,26 +188,26 @@ void reset_IMU() {
 void read_line_camera(void)
 {
   int i;
-  digitalWrite(CLKpin, LOW);
+  digitalWrite(CLkpin, LOW);
   digitalWrite(SIpin, HIGH);
-  digitalWrite(CLKpin, HIGH);
+  digitalWrite(CLkpin, HIGH);
   digitalWrite(SIpin, LOW);
   delayMicroseconds(1);
 
   for (i = 0; i < NPIXELS; i++)
   {
     Pixel[i] = analogRead(A0pin) / 4;
-    digitalWrite(CLKpin, LOW);
+    digitalWrite(CLkpin, LOW);
     delayMicroseconds(1);
-    digitalWrite(CLKpin, HIGH);
+    digitalWrite(CLkpin, HIGH);
   }
-  digitalWrite(CLKpin, LOW);
+  digitalWrite(CLkpin, LOW);
 }
 
 void update_robot_distance()
 {
-  long delta_A = Encoder_A_pulse - Prev_encoder_A;
-  long delta_B = Encoder_B_pulse - Prev_encoder_B;
+  long delta_A = Encoder_A_pulse - Prev_Encoder_A;
+  long delta_B = Encoder_B_pulse - Prev_Encoder_B;
 
   float avg_pulse = (delta_A + delta_B) / 2.0;
   robot_distance += (avg_pulse / pulses_per_rev) * wheel_circumference;
@@ -215,8 +215,8 @@ void update_robot_distance()
   Serial.print("Distance: ");
   Serial.println(robot_distance);
 
-  Prev_encoder_A = Encoder_A_pulse;
-  Prev_encoder_B = Encoder_B_pulse;
+  Prev_Encoder_A = Encoder_A_pulse;
+  Prev_Encoder_B = Encoder_B_pulse;
 }
 
 
@@ -233,19 +233,19 @@ void yaw_control()
   if (Yaw_error > 180) Yaw_error -= 360;
   else if (Yaw_error < -180) Yaw_error += 360;
 
-  Yaw_error_d = Yaw_error - Yaw_old_error;
+  Yaw_error_d = Yaw_error - Yaw_error_old;
   pid_out = Yaw_kp * Yaw_error + Yaw_kd * Yaw_error_d;
-  Yaw_old_error = Yaw_error;
+  Yaw_error_old = Yaw_error;
 
-  l_motor_speed = Base_speed + (int)pid_out;
-  r_motor_speed = Base_speed - (int)pid_out;
+  l_motor_speed = base_speed + (int)pid_out;
+  r_motor_speed = base_speed - (int)pid_out;
 
   motor_control(l_motor_speed, r_motor_speed);
 }
 
 void threshold_line_image(int threshold_value)
 {
-  digitalWrite(test_pin, HIGH);
+  digitalWrite(Test_pin, HIGH);
   for (int i = 0; i < NPIXELS; i++)
   {
     if (Pixel[i] >= threshold_value)
@@ -255,7 +255,7 @@ void threshold_line_image(int threshold_value)
       Threshold_Data[i] = 0;
     }
   }
-  digitalWrite(test_pin, LOW);
+  digitalWrite(Test_pin, LOW);
 }
 
 double line_COM(void)
@@ -282,11 +282,11 @@ void line_control(int line_center)
 {
   int error = line_center - IMG_WIDTH_HALF;
   int derivative = error - error_old;
-  float output = KP * error + KD * derivative;
+  float output = kp * error + KD * derivative;
   int speed_difference = int(output);
 
-  int right_speed = Base_speed - speed_difference;
-  int left_speed  = Base_speed + speed_difference;
+  int right_speed = BASE_SPEED - speed_difference;
+  int left_speed  = BASE_SPEED + speed_difference;
 
   left_speed = constrain(left_speed, 0, 100);
   right_speed = constrain(right_speed, 0, 100);
